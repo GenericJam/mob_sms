@@ -60,12 +60,42 @@ inline fn pidFromLong(jpid: jni.JLong) erts.ErlNifPid {
     return .{ .pid = low };
 }
 
+// Send {:sms, <atom>} to `pid`. Used by every sad-path branch below AND by
+// the inbound delivery thunk — the caller's contract is "you WILL get one
+// {:sms, _} message" and every failure branch has to honour that or the
+// caller hangs forever waiting.
+fn sendSmsAtomC(pid: *erts.ErlNifPid, atom_c: [*:0]const u8) void {
+    const env = erts.enif_alloc_env() orelse return;
+    defer erts.enif_free_env(env);
+    const msg = erts.makeTuple(env, .{
+        erts.atom(env, "sms"),
+        erts.enif_make_atom(env, atom_c),
+    });
+    _ = erts.enif_send(null, pid, env, msg);
+}
+
 // Call `MobSmsBridge.sms_compose(pid_long, to, body)` — async; the result
 // lands via nativeDeliverSms once the composer is showing (or the intent
-// resolution fails). Returns :ok unconditionally.
-fn callBridgeCompose(env: ?*erts.ErlNifEnv, pid: erts.ErlNifPid, to: ?[*:0]const u8, body: ?[*:0]const u8) erts.ERL_NIF_TERM {
+// resolution fails). Returns :ok unconditionally on the happy path; on the
+// two teardown/setup edges below, it delivers {:sms, :not_available} FIRST
+// so the caller doesn't wait forever.
+fn callBridgeCompose(env: ?*erts.ErlNifEnv, pid_in: erts.ErlNifPid, to: ?[*:0]const u8, body: ?[*:0]const u8) erts.ERL_NIF_TERM {
+    var pid = pid_in;
     var attached: c_int = 0;
-    const jenv = get_jenv(&attached) orelse return erts.atom(env, "error");
+    const jenv = get_jenv(&attached) orelse {
+        // JVM shutting down or thread-attach refused. Deliver :not_available
+        // before we bail so the caller isn't stranded.
+        sendSmsAtomC(&pid, "not_available");
+        return erts.atom(env, "error");
+    };
+    if (g_sms_cls == null or g_sms.compose == null) {
+        // nativeRegister never ran (missing bridge class, or ClassLoader
+        // couldn't find `sms_compose`). Calling into null jclass/jmethodID
+        // is undefined behaviour — deliver :not_available and return.
+        detachIfAttached(attached);
+        sendSmsAtomC(&pid, "not_available");
+        return erts.atom(env, "error");
+    }
     const jto: jni.JString = if (to) |t| jni.newStringUTF(jenv, t) else null;
     const jbody: jni.JString = if (body) |b| jni.newStringUTF(jenv, b) else null;
     jenv.*.CallStaticVoidMethod.?(jenv, g_sms_cls, g_sms.compose, pidToJlong(pid), jto, jbody);
@@ -81,15 +111,9 @@ fn callBridgeCompose(env: ?*erts.ErlNifEnv, pid: erts.ErlNifPid, to: ?[*:0]const
 export fn Java_io_mob_sms_MobSmsBridge_nativeDeliverSms(jenv: *jni.JNIEnv, cls: jni.JClass, pid_long: jni.JLong, result: jni.JString) callconv(.c) void {
     _ = cls;
     var pid = pidFromLong(pid_long);
-    const env = erts.enif_alloc_env() orelse return;
-    defer erts.enif_free_env(env);
     const result_c = jenv.*.GetStringUTFChars.?(jenv, result, null) orelse return;
     defer jenv.*.ReleaseStringUTFChars.?(jenv, result, result_c);
-    const msg = erts.makeTuple(env, .{
-        erts.atom(env, "sms"),
-        erts.enif_make_atom(env, result_c),
-    });
-    _ = erts.enif_send(null, &pid, env, msg);
+    sendSmsAtomC(&pid, result_c);
 }
 
 // ── NIFs ──────────────────────────────────────────────────────────────────

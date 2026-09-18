@@ -25,9 +25,18 @@ static void sms_send2(const ErlNifPid *pid, const char *a1, const char *a2) {
   enif_free_env(e);
 }
 
-// The delegate needs to outlive the modal presentation. Compose flow can only
-// have one active delegate at a time (the composer sheet is modal); the
-// delegate frees itself in didFinishWithResult after dismissal.
+// The delegate needs to outlive the modal presentation. MFMessageComposeViewController's
+// `messageComposeDelegate` is @property(assign) (unsafe_unretained), so the
+// presenting VC never retains it — we do, in g_activeDelegates, until the sheet
+// finishes and dismiss's completion block runs.
+//
+// Multi-flight matters. A caller can (and MOB-256's plugin verify session
+// showed the pattern) fire compose again before an earlier sheet has finished
+// dismissing. A previous version cleared g_activeDelegates on every finish
+// (removeAllObjects), which dropped the OTHER delegate's only strong ref;
+// UIKit then delivered didFinishWithResult: to a dangling pointer → crash.
+// release_active: now removes ONLY the delegate that finished, so overlapping
+// composes each survive to their own callback.
 @interface MobSmsDelegate : NSObject <MFMessageComposeViewControllerDelegate>
 @property (nonatomic, assign) ErlNifPid callerPid;
 @end
@@ -44,17 +53,20 @@ static void sms_send2(const ErlNifPid *pid, const char *a1, const char *a2) {
     default:                            outcome = "failed";    break;
   }
   ErlNifPid pid = self.callerPid;
+  // ARC-strong self is captured by the block below; g_activeDelegates keeps
+  // us alive through the dismiss animation, and release_active:self drops
+  // that ref once the sheet is gone.
   [controller dismissViewControllerAnimated:YES completion:^{
     sms_send2(&pid, "sms", outcome);
-    // Break the retain cycle: the presenting VC held the delegate via the
-    // g_activeDelegates array; now that the sheet is gone we clear it.
-    [MobSmsDelegate release_active];
+    [MobSmsDelegate release_active:self];
   }];
 }
 
-// A simple retention holder — the compose flow is inherently single-user
-// (modal sheet), so we keep at most one delegate here across the async
-// present → dismiss → callback lifecycle.
+// Multi-flight-safe retention holder. Each delegate is added on present and
+// removed by its own didFinish callback; other in-flight delegates are
+// untouched. The compose flow is USUALLY single-user (modal sheet blocks
+// further UI) but the modal-vs-non-modal invariant is a UIKit convention,
+// not something the plugin enforces.
 static NSMutableArray<MobSmsDelegate *> *g_activeDelegates = nil;
 
 + (void)retain_active:(MobSmsDelegate *)delegate {
@@ -64,9 +76,9 @@ static NSMutableArray<MobSmsDelegate *> *g_activeDelegates = nil;
   }
 }
 
-+ (void)release_active {
++ (void)release_active:(MobSmsDelegate *)delegate {
   @synchronized ([MobSmsDelegate class]) {
-    [g_activeDelegates removeAllObjects];
+    [g_activeDelegates removeObject:delegate];
   }
 }
 
@@ -100,9 +112,19 @@ static UIViewController *sms_top_view_controller(void) {
   // VC that isn't at the top produces UIKit "not in view hierarchy" warnings
   // and often refuses outright.
   while (vc.presentedViewController != nil) vc = vc.presentedViewController;
+  // If the top VC is mid-transition (being dismissed / presented), calling
+  // presentViewController: on it silently no-ops — UIKit logs "Attempt to
+  // present X on Y whose view is not in the window hierarchy" and drops the
+  // request. Delegate never fires, caller hangs. Report :not_available instead.
+  if (vc.isBeingDismissed || vc.isBeingPresented) return nil;
   return vc;
 }
 
+// enif_inspect_binary / enif_inspect_iolist_as_binary return 1 on success
+// and 0 on failure. The `!x && !y` chain therefore fires only when BOTH
+// return 0 — i.e. neither inspection accepted the term. Correct semantics
+// but the double-negate reads oddly; kept in this form for parity with the
+// mob-core NIF helpers and to make the "give up early" pattern greppable.
 static NSString *sms_str_from_iolist(ErlNifEnv *env, ERL_NIF_TERM term) {
   ErlNifBinary bin;
   if (!enif_inspect_binary(env, term, &bin) &&

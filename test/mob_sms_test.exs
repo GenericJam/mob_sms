@@ -59,38 +59,47 @@ defmodule MobSmsTest do
     end
   end
 
-  describe "MobSms.compose/2 with the NIF unavailable" do
-    # Without an on-device build the NIF is not loaded — attempting a compose
-    # call raises ErlangError. The Elixir surface is intentionally
-    # thin (arg normalisation → NIF call), so on-device verification is the
-    # real gate; these tests pin the surface shape the NIF is called with.
+  describe "MobSms.normalize_opts/1" do
+    # The unit-testable half of compose/2, split out so the coercion is
+    # observable without the NIF loaded. compose/2 itself is fire-and-forget
+    # against a NIF that needs a device — those integration paths are pinned
+    # by the mob_sms_verify physical-device harness, not by this suite.
+    #
+    # 0.1.1's tests wrapped this coercion inside assert_raise ErlangError,
+    # which fired on the missing NIF rather than on the coercion. Deleting
+    # the `|> to_string()` calls from compose/2 didn't fail the suite. This
+    # rewrite actually observes normalize_opts's output so a regression to
+    # the coercion is caught.
 
-    test "coerces :to and :body opts to strings before the NIF call" do
-      # A missing NIF module surfaces as ErlangError on the NIF
-      # call — but only AFTER the opt normalisation. If we passed integer opts
-      # unchanged, we'd hit ArgumentError from to_string/1 first. Assert the
-      # normalisation ran.
-      assert_raise ErlangError, fn ->
-        MobSms.compose(%Mob.Socket{}, to: "5551234567", body: "ping")
-      end
-
-      # Non-binary inputs coerce cleanly — the surface should not raise on
-      # things like integer phone components (that gets coerced to a string
-      # before the NIF sees it).
-      assert_raise ErlangError, fn ->
-        MobSms.compose(%Mob.Socket{}, to: 15_551_234_567, body: "ping")
-      end
+    test "coerces :to and :body strings through unchanged" do
+      assert MobSms.normalize_opts(to: "+15551234567", body: "hi") ==
+               {"+15551234567", "hi"}
     end
 
-    test "returns the same socket the caller passed in" do
-      # The public contract is fire-and-forget — compose/2 kicks a native
-      # present, replies land on the caller via handle_info. The socket
-      # threads through unchanged. Impossible to check the NIF path here,
-      # but the socket return itself is provable regardless.
-      socket = %Mob.Socket{}
-      # ErlangError trips inside — but the intent is documented.
-      assert_raise ErlangError, fn ->
-        assert MobSms.compose(socket, body: "hi") == socket
+    test "coerces integer :to to a string (the common caller-writes-a-number shape)" do
+      assert MobSms.normalize_opts(to: 15_551_234_567, body: "ping") ==
+               {"15551234567", "ping"}
+    end
+
+    test "coerces atom :body via String.Chars (:hello → \"hello\")" do
+      assert MobSms.normalize_opts(to: "+15551234567", body: :hello) ==
+               {"+15551234567", "hello"}
+    end
+
+    test "empty binaries for missing :to and :body" do
+      # An empty :to opens the composer with an empty recipient field (the
+      # user picks from Contacts); an empty :body opens with no pre-filled
+      # text. Both are legitimate uses of the plugin.
+      assert MobSms.normalize_opts([]) == {"", ""}
+    end
+
+    test "propagates String.Chars-undefined values as a real Protocol.UndefinedError" do
+      # Passing a bare map has no String.Chars implementation; to_string/1
+      # raises Protocol.UndefinedError. The surface intentionally does not
+      # swallow this — callers get the real error at the call site instead
+      # of a confusing NIF-level crash on the wire.
+      assert_raise Protocol.UndefinedError, fn ->
+        MobSms.normalize_opts(to: %{}, body: "x")
       end
     end
   end

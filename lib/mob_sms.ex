@@ -73,9 +73,26 @@ defmodule MobSms do
   """
   @spec compose(Mob.Socket.t(), keyword()) :: Mob.Socket.t()
   def compose(socket, opts \\ []) do
-    to = opts |> Keyword.get(:to, "") |> to_string()
-    body = opts |> Keyword.get(:body, "") |> to_string()
+    {to, body} = normalize_opts(opts)
     :mob_sms_nif.sms_compose(to, body)
     socket
+  end
+
+  @doc """
+  Coerce the `compose/2` opts into the `{to, body}` string pair the NIF
+  expects. Split out so the coercion is unit-testable in isolation — the
+  native flow itself requires a device.
+
+  Non-binary values (integers, atoms) are coerced via `to_string/1` so the
+  common call shape `compose(socket, to: 15551234567, body: :hello)` doesn't
+  raise. Missing keys default to empty binaries, which the composer treats as
+  "no recipient (let user pick)" and "empty body."
+  """
+  @doc since: "0.1.2"
+  @spec normalize_opts(keyword()) :: {String.t(), String.t()}
+  def normalize_opts(opts) when is_list(opts) do
+    to = opts |> Keyword.get(:to, "") |> to_string()
+    body = opts |> Keyword.get(:body, "") |> to_string()
+    {to, body}
   end
 end
