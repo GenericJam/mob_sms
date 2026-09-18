@@ -52,8 +52,8 @@ defmodule MobSms do
   under the `SEND_SMS` runtime permission, but Google Play rejects that
   permission request for most non-SMS-centric apps (the "Permissions
   Declaration" gate). If the user has a real reason to bypass the sheet on
-  Android — and can accept iOS being permanently in composer mode — that
-  can be a separate `Mob.Sms.send/2` in a later release.
+  Android — and can accept iOS being permanently in composer mode — a
+  separate `send/2` on this module can land in a later release.
   """
 
   @typedoc "Result atom delivered to the caller after the composer flow settles."

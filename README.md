@@ -60,7 +60,7 @@ This asymmetry is by design at the platform layer, not something the plugin can 
 
 Not silent-send. iOS has no public API for sending SMS without the user tapping Send; Apple treats that as a bright-line spam surface. Android *can* silent-send via `SmsManager.sendTextMessage` under the `SEND_SMS` runtime permission, but Google Play rejects that permission request for most non-SMS-centric apps (the "Permissions Declaration" gate).
 
-If you have a real reason to bypass the sheet on Android — and can accept iOS being permanently in composer mode — that can be a separate `MobSms.send/2` in a later release. Talk to us before designing around it.
+If you have a real reason to bypass the sheet on Android — and can accept iOS being permanently in composer mode — a separate `send/2` on this module can land in a later release. Talk to us before designing around it.
 
 ## Related
 
