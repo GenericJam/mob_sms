@@ -1,6 +1,6 @@
 %{
   name: :mob_sms,
-  mob_version: "~> 0.9",
+  mob_version: "~> 0.9.1",
   plugin_spec_version: 1,
   # Package description lives in mix.exs (that's what Hex publishes and what
   # `mix hex.info mob_sms` shows). The plugin manifest schema does not accept
@@ -34,7 +34,18 @@
   android: %{
     bridge_kt: "priv/native/android/MobSmsBridge.kt",
     bridge_class: "io.mob.sms.MobSmsBridge",
-    permissions: []
+    permissions: [],
+    # SMS Retriever (0.2.0+): the OTP flow needs
+    # `com.google.android.gms.auth.api.phone` to talk to Google Play Services.
+    # No user-visible permission dialog — GMS routes matching SMSes to the
+    # app based on the app's package hash. Present on 99%+ of Play-installed
+    # devices; aftermarket ROMs without GMS deliver {:sms_otp, ""} on start
+    # failure (see MobSms.OneTimeCode).
+    #
+    # Version pinned to 18.0.2 — 18.1.0+ ships kotlin_module metadata built
+    # against Kotlin 2.x, which mob's Android template currently compiles
+    # with 1.9. When mob bumps its Kotlin baseline this can move forward.
+    gradle_deps: ["com.google.android.gms:play-services-auth-api-phone:18.0.2"]
   },
   ios: %{
     # MessageUI is the framework that ships MFMessageComposeViewController.

@@ -2,7 +2,7 @@ defmodule MobSms.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/GenericJam/mob_sms"
-  @version "0.1.2"
+  @version "0.2.0"
 
   def project do
     [
@@ -35,7 +35,7 @@ defmodule MobSms.MixProject do
 
   defp deps do
     [
-      {:mob, "~> 0.9"},
+      {:mob, "~> 0.9.1"},
       {:mob_dev, "~> 0.6", only: [:dev, :test], runtime: false},
       # Code quality — Credo + ex_slop (AI-pattern checks) + jump_credo_checks,
       # mirroring mob core's pre-commit gate.

@@ -4,13 +4,14 @@ SMS composer for [Mob](https://github.com/GenericJam/mob) apps. Opens the user's
 
 ## Install
 
-Requires mob 0.9.0 or newer.
+Requires mob 0.9.1 or newer (the OTP flow's iOS half needs the
+`text_content_type` prop on `<TextField>`, added in that release).
 
 ```elixir
 def deps do
   [
-    {:mob,     "~> 0.9.0"},
-    {:mob_sms, "~> 0.1"}
+    {:mob,     "~> 0.9.1"},
+    {:mob_sms, "~> 0.2"}
   ]
 end
 ```
@@ -55,6 +56,69 @@ This asymmetry is by design at the platform layer, not something the plugin can 
 - **Share a link / share a file** — user picks a friend inside the composer
 - **Tell a friend** — referral flows without your app needing to know the friend's number
 - **Verification workaround** — send a code to a manually-provided number without SMS gateway costs
+
+## One-time code (OTP) autofill
+
+The 0.2.0 addition. Verification codes delivered by SMS flow into the app
+without the user typing them — iOS via QuickType autofill above the keyboard,
+Android via Google Play Services' SMS Retriever (no `READ_SMS` permission,
+no Play Store review gate).
+
+```elixir
+# On the screen owning the OTP field. Pass the SAME atom to `on_receive`
+# that the text field uses for `on_change` — both platforms deliver the
+# code as {:change, tag, value}, matching the field's normal keystroke
+# shape.
+def mount(_params, _session, socket) do
+  {:ok, MobSms.OneTimeCode.arm(socket, on_receive: :code)}
+end
+
+def render(assigns) do
+  ~MOB"""
+  <TextField
+    value={@code}
+    on_change={:code}
+    keyboard={:number}
+    text_content_type={:one_time_code}
+  />
+  """
+end
+
+def handle_info({:change, :code, value}, socket) do
+  # Fires on BOTH platforms — iOS QuickType tap OR Android SMS Retriever.
+  # The plugin translates Android's raw delivery into the on_change shape.
+  {:noreply, Mob.Socket.assign(socket, code: value)}
+end
+
+def handle_info({:sms_otp, :timeout}, socket) do
+  # Optional. Android-only sad path: 5-min retriever timeout, GMS
+  # failure, or evicted by a subsequent arm/2. iOS never fires this.
+  {:noreply, socket}
+end
+```
+
+The `text_content_type: :one_time_code` prop tells iOS Messages to
+surface the code in QuickType. `arm/2` starts the Android SMS Retriever
+and spawns a tiny proxy that translates the delivery into the same
+`{:change, tag, code}` shape iOS uses — one handler per screen.
+
+Server-side SMS format for Android:
+
+```
+Your Sample App code is: 123456
+<blank line>
+FA+9qCX9VSu
+```
+
+The 11-char suffix is `base64(sha256("<package_name> <signing_cert_sha256_hex>"))[:11]`
+— it's what Google Play Services uses to route the SMS to your specific
+app. See `MobSms.OneTimeCode`'s docs for the debug-vs-release cert
+distinction and Google's `AppSignatureHelper` snippet for computing the
+hash during development. iOS doesn't need the hash — its SMS format is
+any natural-language "your code is 123456" pattern.
+
+See the full contract, per-platform behaviour, and edge cases in
+`MobSms.OneTimeCode`'s module documentation.
 
 ## What this plugin is NOT
 

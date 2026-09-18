@@ -26,16 +26,18 @@ extern var g_jvm: ?*jni.JavaVM;
 // ── Plugin-owned bridge-class method-id cache ────────────────────────────
 const SmsMethods = struct {
     compose: jni.JMethodID = null,
+    arm_one_time_code: jni.JMethodID = null,
 };
 
 var g_sms: SmsMethods = .{};
 var g_sms_cls: jni.JClass = null;
 
-// ── nativeRegister thunk — cache the bridge jclass + method id ────────────
+// ── nativeRegister thunk — cache the bridge jclass + method ids ───────────
 export fn Java_io_mob_sms_MobSmsBridge_nativeRegister(jenv: *jni.JNIEnv, cls: jni.JClass) callconv(.c) void {
     g_sms_cls = jni.newGlobalRef(jenv, cls);
     if (g_sms_cls == null) return;
     g_sms.compose = jni.getStaticMethodID(jenv, cls, "sms_compose", "(JLjava/lang/String;Ljava/lang/String;)V");
+    g_sms.arm_one_time_code = jni.getStaticMethodID(jenv, cls, "arm_one_time_code", "(J)V");
 }
 
 // ── Thread-attach + pid round-trip helpers (mirror mob-core / biometric) ──
@@ -116,6 +118,74 @@ export fn Java_io_mob_sms_MobSmsBridge_nativeDeliverSms(jenv: *jni.JNIEnv, cls: 
     sendSmsAtomC(&pid, result_c);
 }
 
+// ── OTP: arm SMS Retriever ────────────────────────────────────────────────
+// Calls MobSmsBridge.arm_one_time_code(pid). The Kotlin side registers the
+// GMS BroadcastReceiver + calls SmsRetrieverClient.startSmsRetriever;
+// nativeDeliverSmsCode below sends {:sms_otp, code} back to the pid on SMS
+// arrival (or {:sms_otp, ""} on timeout / failure).
+fn callBridgeArmOtp(env: ?*erts.ErlNifEnv, pid_in: erts.ErlNifPid) erts.ERL_NIF_TERM {
+    var pid = pid_in;
+    var attached: c_int = 0;
+    const jenv = get_jenv(&attached) orelse {
+        sendSmsOtp(&pid, "");
+        return erts.atom(env, "error");
+    };
+    if (g_sms_cls == null or g_sms.arm_one_time_code == null) {
+        detachIfAttached(attached);
+        sendSmsOtp(&pid, "");
+        return erts.atom(env, "error");
+    }
+    jenv.*.CallStaticVoidMethod.?(jenv, g_sms_cls, g_sms.arm_one_time_code, pidToJlong(pid));
+    detachIfAttached(attached);
+    return erts.ok(env);
+}
+
+// Send {:sms_otp, "<code>"} to `pid`. Code is a variable-length string
+// (usually 4-8 digits, but the format is per-server so we don't cap it here).
+// Empty string signals "SMS Retriever timed out or failed" — the Elixir
+// proxy translates it into {:sms_otp, :timeout} for the caller.
+//
+// OOM handling: on enif_alloc_binary failure fall back to a zero-size
+// binary so the caller ALWAYS receives one {:sms_otp, _} message. Anything
+// else strands the pid, and the plugin's contract is that arm/2 either
+// forwards a code OR fires the timeout signal.
+fn sendSmsOtp(pid: *erts.ErlNifPid, code_c: [*:0]const u8) void {
+    const env = erts.enif_alloc_env() orelse return;
+    defer erts.enif_free_env(env);
+    // Length of code_c up to a sane cap. OTPs are ≤ 8 digits typically;
+    // 256 covers any pathological upstream string.
+    var len: usize = 0;
+    while (code_c[len] != 0 and len < 256) : (len += 1) {}
+
+    // enif_alloc_binary returns 1 on success, 0 on OOM. On OOM retry with
+    // zero size so the caller sees {:sms_otp, ""} — the proxy translates
+    // that to :timeout. If even the zero-size alloc fails we're too deep
+    // to recover; drop, let the proxy's 6-minute after-clause fire the
+    // timeout instead. enif_make_binary transfers ownership of bin.data
+    // to the BEAM once called.
+    var bin: erts.ErlNifBinary = undefined;
+    if (erts.enif_alloc_binary(len, &bin) == 0) {
+        if (erts.enif_alloc_binary(0, &bin) == 0) return;
+    } else if (len > 0) {
+        @memcpy(bin.data[0..len], code_c[0..len]);
+    }
+    const bin_term = erts.enif_make_binary(env, &bin);
+    const msg = erts.makeTuple(env, .{
+        erts.atom(env, "sms_otp"),
+        bin_term,
+    });
+    _ = erts.enif_send(null, pid, env, msg);
+}
+
+// ── Inbound OTP delivery thunk — Kotlin's BroadcastReceiver calls this ────
+export fn Java_io_mob_sms_MobSmsBridge_nativeDeliverSmsCode(jenv: *jni.JNIEnv, cls: jni.JClass, pid_long: jni.JLong, code: jni.JString) callconv(.c) void {
+    _ = cls;
+    var pid = pidFromLong(pid_long);
+    const code_c = jenv.*.GetStringUTFChars.?(jenv, code, null) orelse return;
+    defer jenv.*.ReleaseStringUTFChars.?(jenv, code, code_c);
+    sendSmsOtp(&pid, code_c);
+}
+
 // ── NIFs ──────────────────────────────────────────────────────────────────
 
 // Copy a binary/iolist arg into a null-terminated buffer. The bridge call
@@ -152,6 +222,18 @@ fn nif_sms_compose(
     return callBridgeCompose(env, pid, jni.asCStr(&to), jni.asCStr(&body));
 }
 
+fn nif_sms_arm_one_time_code(
+    env: ?*erts.ErlNifEnv,
+    argc: c_int,
+    argv: [*]const erts.ERL_NIF_TERM,
+) callconv(.c) erts.ERL_NIF_TERM {
+    _ = argc;
+    _ = argv;
+    var pid: erts.ErlNifPid = undefined;
+    _ = erts.enif_self(env, &pid);
+    return callBridgeArmOtp(env, pid);
+}
+
 // ── NIF table + init entry point ─────────────────────────────────────────
 fn nifLoad(env: ?*erts.ErlNifEnv, priv: *?*anyopaque, info: erts.ERL_NIF_TERM) callconv(.c) c_int {
     _ = env;
@@ -162,6 +244,7 @@ fn nifLoad(env: ?*erts.ErlNifEnv, priv: *?*anyopaque, info: erts.ERL_NIF_TERM) c
 
 const nif_funcs = [_]erts.ErlNifFunc{
     .{ .name = "sms_compose", .arity = 2, .fptr = nif_sms_compose, .flags = 0 },
+    .{ .name = "sms_arm_one_time_code", .arity = 0, .fptr = nif_sms_arm_one_time_code, .flags = 0 },
 };
 
 var nif_entry: erts.ErlNifEntry = .{
