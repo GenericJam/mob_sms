@@ -11,7 +11,8 @@ defmodule MobSms.DemoScreen do
     hands off. Result flows to `handle_info/2` as `{:sms, atom}`.
 
   * **One-time code (OTP)** — arms the platform's OTP autofill on mount
-    with `on_receive: :code` (matches the text field's `on_change={:code}`).
+    with `on_receive: :code` (matches the text field's
+    `on_change={{self(), :code}}`).
     Both platforms deliver the received code as `{:change, :code, value}`
     — same shape as any keystroke — so one handler covers iOS
     QuickType autofill AND Android's SMS Retriever. The optional
@@ -26,8 +27,8 @@ defmodule MobSms.DemoScreen do
   def mount(_params, _session, socket) do
     # Kick the OTP arm on mount. Idempotent on iOS (no-op); on Android,
     # starts a 5-minute retriever window. `:code` matches the text field's
-    # on_change={:code} tag so the retriever's delivery lands in the same
-    # handler as user keystrokes / iOS QuickType.
+    # on_change={{self(), :code}} tag so the retriever's delivery lands in
+    # the same handler as user keystrokes / iOS QuickType.
     socket = MobSms.OneTimeCode.arm(socket, on_receive: :code)
 
     {:ok,
@@ -41,6 +42,10 @@ defmodule MobSms.DemoScreen do
   @impl true
   def render(assigns) do
     tap_compose = {self(), :compose}
+    # on_change must be a {pid, tag} tuple — Mob.Renderer's on_change
+    # pattern match requires the pid, and an atom-only value is silently
+    # dropped by the renderer.
+    change_code = {self(), :code}
 
     ~MOB"""
     <Scroll background={:background}>
@@ -64,7 +69,7 @@ defmodule MobSms.DemoScreen do
         <Spacer size={12} />
         <TextField
           value={assigns.code}
-          on_change={:code}
+          on_change={change_code}
           keyboard={:number}
           text_content_type={:one_time_code}
           placeholder="Verification code"

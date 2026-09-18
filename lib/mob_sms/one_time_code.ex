@@ -24,7 +24,7 @@ defmodule MobSms.OneTimeCode do
         <Column>
           <TextField
             value={@code}
-            on_change={:code}
+            on_change={{self(), :code}}
             keyboard={:number}
             text_content_type={:one_time_code}
             placeholder="Verification code"
@@ -138,7 +138,7 @@ defmodule MobSms.OneTimeCode do
       # in render:
       <TextField
         value={@code}
-        on_change={:code}
+        on_change={{self(), :code}}
         text_content_type={:one_time_code}
       />
 

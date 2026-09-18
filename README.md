@@ -77,7 +77,7 @@ def render(assigns) do
   ~MOB"""
   <TextField
     value={@code}
-    on_change={:code}
+    on_change={{self(), :code}}
     keyboard={:number}
     text_content_type={:one_time_code}
   />

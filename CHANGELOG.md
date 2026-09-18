@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
+## [0.2.1] - 2026-09-18
+
+### ⚠ Consumer action required
+If you copied the 0.2.0 OTP example from `README.md` or `MobSms.OneTimeCode`'s @moduledoc, your `<TextField>` currently reads `on_change={:code}` (bare atom). Mob's renderer silently drops that form, so no `handle_info({:change, :code, value}, _)` clause ever fires — the field fills visually from iOS QuickType or Android SMS Retriever, but your `assign` doesn't run. Change it to `on_change={{self(), :code}}` (a `{pid, tag}` tuple).
+
+### Fixed
+- **Demo screen `on_change` wiring**: `MobSms.DemoScreen`'s OTP `<TextField>` used the same wrong bare-atom form as the docs. Fixed to `on_change={{self(), :code}}`. Verified end-to-end on physical iPhone SE (iOS QuickType) and Moto G Power 5G 2024 (Android SMS Retriever) after the fix.
+- **Regression test**: source-level assertion in `MobSms.DemoScreenTest` walks `demo_screen.ex` and fails if any `on_change=` or `on_tap=` binding is a bare atom rather than a `{pid, tag}` tuple. This exact bug is what slipped through 0.2.0's publish; the test pins the form so it can't silently regress.
+
+### Docs
+- **README + `MobSms.OneTimeCode` @moduledoc**: `on_change={:code}` → `on_change={{self(), :code}}` in the usage examples so the pattern the docs teach is one that actually fires. Same correction applied to `MobSms.DemoScreen`'s @moduledoc and inline comment.
+
 ## [0.2.0] - 2026-09-18
 
 ### Added
