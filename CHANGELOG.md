@@ -6,7 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
-## [0.1.0] - unreleased
+## [0.1.1] - 2026-09-18
+
+### Docs
+- Rework the "not silent-send" section of `MobSms`'s @moduledoc and the same section in README.md so ex_doc's function-link resolver isn't asked to resolve `MobSms.send/2` — a hypothetical future silent-send API, not something that ships. Removes a `mix docs` warning; the deferred-until-a-user-asks stance on silent send is unchanged.
+
+## [0.1.0] - 2026-09-18
 
 Initial release. Cross-platform SMS composer plugin.
 
