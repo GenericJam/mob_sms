@@ -36,7 +36,9 @@ defmodule MobSms.MixProject do
   defp deps do
     [
       {:mob, "~> 0.9.1"},
-      {:mob_dev, "~> 0.6", only: [:dev, :test], runtime: false},
+      # 0.7.2+ signs v2 envelopes; mob_dev hosts refuse the v1 envelope
+      # earlier versions write, so CI's `mix mob.plugin.sign` needs this floor.
+      {:mob_dev, "~> 0.7.2", only: [:dev, :test], runtime: false},
       # Code quality — Credo + ex_slop (AI-pattern checks) + jump_credo_checks,
       # mirroring mob core's pre-commit gate.
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
