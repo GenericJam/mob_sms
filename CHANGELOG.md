@@ -6,7 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
-## [Unreleased]
+## [0.2.3] - 2026-10-01
 
 ### Fixed
 - 0.2.2's signature used the legacy v1 envelope (written by mob_dev 0.7.0), which current `mob_dev` refuses with `envelope_v1_unsupported`, so hosts still couldn't activate the plugin. The release workflow now signs with mob_dev 0.7.2+, which writes the v2 envelope.
