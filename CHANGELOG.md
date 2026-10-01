@@ -6,7 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
-## [Unreleased]
+## [0.2.2] - 2026-10-01
 
 ### Changed
 - Releases are signed with the mob first-party key. `priv/mob_plugin.pub` (the shared first-party public key, fingerprint `ed25519:nc56w+1Kx0gIt/4EkHxnMZCKHMzp4+S5kS/HoSzEZkg=`) is now committed, and the release workflow regenerates `priv/mob_plugin.sig` from the current manifest before every Hex publish, so `mob_dev` hosts verify the package instead of reporting it unsigned.
