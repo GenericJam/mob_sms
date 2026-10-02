@@ -1,6 +1,6 @@
-# AGENTS.md — orientation for AI agents working on mob_sms
+# mob_sms — Agent Instructions
 
-You're in **mob_sms**, a Mob plugin that opens the user's default SMS app pre-filled with a recipient + body. Cross-platform surface (`MobSms.compose/2`), NIF + Kotlin bridge per platform, thin Elixir wrapper.
+You're in **mob_sms**, a Mob plugin that opens the user's default SMS app pre-filled with a recipient + body. Cross-platform surface (`MobSms.compose/2`), NIF + Kotlin bridge per platform, thin Elixir wrapper. Modeled on `mob_biometric` structurally; consult that repo when you need a reference for the NIF pattern or the plugin manifest shape.
 
 **Also read [`~/code/mob/AGENTS.md`](../mob/AGENTS.md)** for the system view: the mob three-repo topology, the plugin manifest schema, `Mob.Composite` / `Mob.Sigil`, how to drive a running app from your session, and the cross-cutting pre-empt-failure rules. This file is mob_sms-specific.
 
@@ -72,19 +72,25 @@ Every substantive change here needs a screenshot on **both** iOS and Android, de
 - iOS Simulator: `canSendText` reports `NO`, so you always get `:not_available`. Cannot see the composer sheet in the sim.
 - Android emulator: no default SMS app installed, so the intent resolves to nothing and you always get `:not_available`. Cannot see the SMS app hand-off in the emulator.
 
-The verification loop, in short:
+The verification loop:
 
-1. Generate or use a host app that pins this plugin (`mob_sms` in `mix.exs`, `config :mob, :plugins, [:mob_sms]` in `mob.exs`).
-2. Deploy to physical Moto G Power (Android 11) + physical iPhone (iOS 16+).
-3. Tap the demo screen's "Compose invite" button.
+1. Generate or use a host app that pins this plugin (`mob_sms` in `mix.exs`, `config :mob, :plugins, [:mob_sms]` in `mob.exs`). If none exists, spin up a `mob_sms_verify` scratchpad app the way MOB-246 spun up `mob-mishka-verify`.
+2. Deploy to physical Moto G Power (Android 11) + physical iPhone (iOS 16+): `mix mob.deploy --native --all-physical` from that app.
+3. Navigate to `MobSms.DemoScreen` (auto-listed if the host enumerates `Mob.Plugins.screens/0`) and tap the "Compose invite" button — iOS shows the sheet, Android hands off to the SMS app.
 4. Screenshot the sheet on iOS and the SMS app hand-off on Android.
-5. Actually type or don't type in the composer; assert the `handle_info` result the demo screen shows.
+5. Actually type or don't type in the composer; assert the `handle_info` result the demo screen shows. On iOS, exercise both Send and Cancel — verify `:sent` and `:cancelled` both arrive. On Android, verify `:composer_opened` arrives immediately after the SMS app is up.
 
 Kevin's memory has a `mishka_verify` / `mob-mishka-verify` throwaway app pattern used during the MOB-246 epic. A `mob_sms_verify` app spun up the same way is the verification harness for this plugin.
 
 ## Worktrees
 
 **Default assumption: work happens in a git worktree.** Kevin runs multiple agents in parallel; each task in its own worktree prevents conflicts.
+
+If a task is assigned to you and worktree usage isn't mentioned, ask:
+
+> "Should I use a worktree for this?"
+
+Yes for anything non-trivial or that touches native code. In-place is fine for a single-file doc edit, one-line config change, or a version bump.
 
 ```bash
 cd ~/code/mob_sms
@@ -93,6 +99,34 @@ cd ../mob_sms-worktrees/<slug>
 ```
 
 Git stash stack is shared — never bare `git stash` / `git stash pop`. Prefer a temporary WIP commit; if you must stash, use `git stash push -u -m "<unique-tag>"`, capture the SHA via `git stash list --format='%H %gs'`, restore with `git stash apply <sha>`, drop by tag after.
+
+## Pre-commit checklist
+
+Before committing, run all in this order:
+
+```bash
+mix test                            # full suite must pass
+mix format                          # apply formatting
+mix credo --strict                  # whole tree, includes ExSlop
+```
+
+Pre-push hook (`.githooks/pre-push`) adds format + credo strict + fast tests on every push. Activate once:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+### Tests are part of the change
+
+New behaviour ships with a test unless the change is small enough that a test would only restate it. The bar is: **would this test fail if the fix were reverted?** Check by reverting it.
+
+### Decision log — check both directions
+
+Before committing, ask two questions (the log itself is described under "Decision log" below):
+
+**Does this need a new record?** Anything non-obvious: a tradeoff, a workaround, a convention. The commit message explaining a decision means that decision belongs in `decisions/` where it's findable.
+
+**Does this INVALIDATE an existing record?** More dangerous half. A record asserting a property the code no longer has is worse than no record. Grep `decisions/` for the mechanism you are changing before you commit, and act on what you find — see "Decision log" below for how; never quietly delete a record.
 
 ## Adversarial review — before every non-trivial commit
 
@@ -106,20 +140,26 @@ Especially important for this plugin:
 
 Skip only for: formatting, a typo, a version bump, a changelog edit.
 
+## Before the merge — a second review, on the PR
+
+Same as mob_mishka. Give the reviewer the PR, what it claims, what you're least sure of, and ask for MERGE / DO NOT MERGE with reasons.
+
+**Mechanical preconditions you check yourself:**
+
+- CI is green AND the run is newer than the last commit.
+- The branch is not behind master.
+- The `mob` floor pin is a version that actually exists on Hex.
+
 ## Release flow
 
 Canonical process lives in [`~/code/mob/RELEASE.md`](../mob/RELEASE.md). mob_sms specifics:
 
-- `mix.exs` `@version` is the source of truth. Bump, commit, push — `.github/workflows/release.yml` detects the mix.exs change and tags / GH-releases / hex-publishes.
+- `mix.exs` `@version` is the source of truth and the trigger. Bump, commit, push to master — `.github/workflows/release.yml` detects the mix.exs change and tags / GH-releases / hex-publishes, each step idempotent.
 - Every release must state the mob version it needs and pin its `mob` dep accordingly. This plugin's floor is `~> 0.9` because the plugin-manifest schema landed with mob 0.9.0 (MOB-247).
+- The `mob` floor pin is load-bearing. Do not bump if the plugin uses a new mob feature that hasn't shipped yet.
+- **Never ship without physical-device verification.** Simulators lie for this plugin — iOS Simulator's `canSendText` returns `NO`, Android emulators have no default SMS app.
 - **Ships as a real Hex package.** Docs shipped in the same `mix hex.publish` call.
 - **Review gate is on by default** (see mob/RELEASE.md § "Review gate"). Everything that landed since the last published version gets a code review before you publish. Skip only if the user says so.
-
-Pre-push hook (`.githooks/pre-push`) runs format + credo strict + fast tests on every push. Activate once:
-
-```bash
-git config core.hooksPath .githooks
-```
 
 ## Decision log
 
@@ -129,7 +169,7 @@ Non-obvious decisions — tradeoffs, workarounds, conventions, "why we chose X o
 decisions/YYYY-MM-DD-short-slug.md
 ```
 
-Each file is a lightweight ADR (`## Context / ## Decision / ## Consequences`). Append new files; never edit existing ones. If a decision changes, add a new file and mark the old `Status: superseded by <file>`. One file per decision keeps the log conflict-free across parallel worktrees.
+Each file is a lightweight ADR (`## Context / ## Decision / ## Consequences`). Append new files; never rewrite existing ones. If a decision changes, add a new file and mark the old `Status: superseded by <file>`. One file per decision keeps the log conflict-free across parallel worktrees. The one in-place edit besides that status line: a record that asserts something about the code that was never or is no longer true gets corrected in place with a note about what was wrong — don't quietly delete it.
 
 Existing calls worth ADRing when they get revisited:
 
@@ -145,4 +185,25 @@ Status lives in **Linear** (team `MOB`), the single board across mob, mob_dev, m
 - **`decisions/`** — durable rationale. Link from the issue; don't copy.
 - **PRs / git** — the code. Reference the issue id in branch, PR title, commits.
 
-`LINEAR_API_KEY` in `~/code/mob/.env`. Team `MOB` uuid = `07dd0939-c66d-44f2-8da5-e3a4a243e953`. No Linear MCP; raw GraphQL endpoint (curl example in mob/CLAUDE.md).
+`LINEAR_API_KEY` in `~/code/mob/.env`. Team `MOB` uuid = `07dd0939-c66d-44f2-8da5-e3a4a243e953`. No Linear MCP; raw GraphQL endpoint (curl example in mob/AGENTS.md).
+
+## Connecting an IEx session to a running Mob app
+
+Full guide at `~/code/mob/AGENTS.md` § "Connecting an IEx session". Short version, from a host app that depends on this plugin:
+
+```bash
+cd /path/to/host_app
+mix mob.connect              # sets up tunnels, IEx attached to all devices
+```
+
+Then from any Mac-side IEx:
+
+```elixir
+node = :"host_app_ios@127.0.0.1"      # or ..._android_<suffix>
+Node.connect(node)
+:rpc.call(node, GenServer, :call, [:mob_screen, :get_current_module])
+:rpc.call(node, Process, :send, [:mob_screen, {:tap, :compose}, []])
+:rpc.call(node, :mob_nif, :screenshot, [:png, 90, 1.0])
+```
+
+Beats `xcrun simctl` / `adb shell input tap` for anything state-related.
