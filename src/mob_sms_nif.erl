@@ -7,7 +7,7 @@
 %% On a host dev build neither is linked, so on_load tolerates the failure and
 %% the NIFs fall back to nif_error until the native merge links one.
 -module(mob_sms_nif).
--export([sms_compose/2, sms_arm_one_time_code/0]).
+-export([sms_compose/2, sms_arm_one_time_code/0, sms_available/0]).
 -on_load(init/0).
 
 init() ->
@@ -20,4 +20,9 @@ sms_compose(_To, _Body) ->
     erlang:nif_error(nif_not_loaded).
 
 sms_arm_one_time_code() ->
+    erlang:nif_error(nif_not_loaded).
+
+%% Read-only: true | false (both platforms), or {error, Reason} on Android when
+%% the Kotlin bridge is unusable. MobSms.SelfTest's proof call.
+sms_available() ->
     erlang:nif_error(nif_not_loaded).

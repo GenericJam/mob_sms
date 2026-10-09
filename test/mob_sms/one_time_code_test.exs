@@ -27,12 +27,18 @@ defmodule MobSms.OneTimeCodeTest do
       assert "com.google.android.gms:play-services-auth-api-phone:18.0.2" in m.android.gradle_deps
     end
 
-    test "requires mob 0.9.1 or newer (text_content_type prop on TextField)",
+    test "the mob dependency excludes releases without text_content_type or Mob.Plugin.SelfTest",
          %{manifest: m} do
-      # mob 0.9.1 shipped `text_content_type: :one_time_code` on :text_field.
-      # The OTP flow's iOS half depends on that prop; older mob versions
-      # would silently ignore the prop and QuickType autofill wouldn't fire.
-      assert m.mob_version == "~> 0.9.1"
+      # mob 0.9.1 shipped `text_content_type: :one_time_code` on :text_field
+      # (the OTP flow's iOS half; older mob silently ignores the prop and
+      # QuickType autofill never fires). mob 0.9.15 shipped Mob.Plugin.SelfTest.
+      # The manifest's mob_version is the family-wide "~> 0.9"; the floor is
+      # enforced by the Hex dependency every host resolves.
+      {:mob, req} = List.keyfind(Mix.Project.config()[:deps], :mob, 0)
+
+      for too_old <- ["0.9.0", "0.9.1", "0.9.14"], do: refute(Version.match?(too_old, req))
+      assert Version.match?("0.9.15", req)
+      assert Version.match?("0.9.15", m.mob_version)
     end
   end
 

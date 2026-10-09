@@ -20,6 +20,9 @@
 // startup caches jclass + method ids, inbound thunks (nativeDeliverSms,
 // nativeDeliverSmsCode) send tuples back to a Long-encoded pid.
 //
+// sms_available (MOB-418) is a synchronous, read-only capability query the
+// self-test uses to prove the bridge is registered; it shows nothing.
+//
 // Android 11+ package-visibility: no <queries> block is required for
 // sms_compose. That system gates PackageManager.resolveActivity /
 // queryIntentActivities but NOT startActivity itself for ACTION_SENDTO.
@@ -36,6 +39,7 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.telephony.TelephonyManager
 import com.google.android.gms.auth.api.phone.SmsRetriever
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Status
@@ -73,6 +77,32 @@ object MobSmsBridge : io.mob.plugin.MobActivityAware {
 
     override fun setActivity(activity: Activity) {
         activityRef = WeakReference(activity)
+    }
+
+    // Read-only capability query behind the sms_available/0 NIF, used by
+    // MobSms.SelfTest (MOB-418). Return codes, mapped to Elixir terms by the
+    // zig NIF:
+    //    1 -> true   the device is SMS-capable (TelephonyManager.isSmsCapable)
+    //    0 -> false  no SMS service (a tablet without a radio, some emulators)
+    //   -1 -> {:error, :no_activity}   setActivity never ran: a host
+    //         integration bug, sms_compose would deliver :not_available
+    //   -2 -> {:error, :query_failed}  the TelephonyManager lookup threw
+    // The catch keeps a Java exception from returning pending into the NIF.
+    // No permission, nothing shown, nothing registered.
+    @JvmStatic
+    fun sms_available(): Int {
+        val activity = activityRef?.get() ?: return -1
+        return try {
+            val tm = activity.applicationContext
+                .getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            // isSmsCapable is deprecated from API 35 in favour of
+            // isDeviceSmsCapable, which hosts compiling against API 34 lack.
+            @Suppress("DEPRECATION")
+            val capable = tm?.isSmsCapable == true
+            if (capable) 1 else 0
+        } catch (t: Throwable) {
+            -2
+        }
     }
 
     @JvmStatic

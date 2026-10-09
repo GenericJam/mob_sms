@@ -41,6 +41,7 @@ No overlap. Do not entangle the identifier-based dispatch shape mob_wake uses wi
 
 - `lib/mob_sms.ex` — public API. Just `compose/2`; keeps the surface small on purpose.
 - `lib/mob_sms/demo_screen.ex` — a ready-to-run screen exercising the compose flow. Auto-listed in a host that enumerates `Mob.Plugins.screens/0`. Delete this and the manifest entry in a real app.
+- `lib/mob_sms/self_test.ex` — `MobSms.SelfTest` (`Mob.Plugin.SelfTest`, manifest `selftest:`), run by `mix mob.selftest` / mob_ci. Calls the read-only `:mob_sms_nif.sms_available/0` (iOS `canSendText`; Android `MobSmsBridge.sms_available()` → `TelephonyManager.isSmsCapable`). `true`/`false` pass; Android's `{:error, :bridge_not_registered | :no_activity | ...}` and the host stub's `nif_not_loaded` fail. Never make it open the composer or arm the OTP receiver.
 - `priv/mob_plugin.exs` — plugin manifest. Declares MessageUI on iOS, no permissions on either platform, no Android manifest queries (see `MobSmsBridge.kt` comments).
 - `priv/native/ios/mob_sms_nif.m` — ObjC NIF presenting MFMessageComposeViewController, delegate lifecycle managed via a static retention array (the compose flow is single-user, so at most one active delegate at a time). Walks the connected-scene / window hierarchy to find the top VC to present from.
 - `priv/native/android/MobSmsBridge.kt` — Kotlin bridge, `Intent.ACTION_SENDTO`, catches `ActivityNotFoundException` as the "no SMS-capable app" signal.
@@ -62,6 +63,7 @@ Coverage:
 - Cross-platform NIF declaration shape.
 - No permission capability, no Android manifest permission, no plist keys.
 - `MobSms.compose/2` argument normalisation (integer opts coerce; nil `:to` becomes empty binary; socket returns unchanged).
+- `MobSms.SelfTest.classify/1` over every `sms_available/0` answer, the manifest's `selftest:` declaration, and NIF stub agreement (every function the zig / ObjC NIF tables register is exported by `src/mob_sms_nif.erl`).
 
 The Elixir surface is intentionally thin — arg normalisation and one NIF call. On-device verification is the real gate; do not add "feature" tests that rely on native code executing.
 
