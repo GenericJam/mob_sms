@@ -31,7 +31,8 @@ defmodule MobSms.SelfTest do
       `setActivity`, so `compose/2` and `OneTimeCode.arm/2` would always
       give up.
     * `{:error, :no_jni_env}` / `{:error, :query_failed}` → fail: no JNIEnv
-      for the scheduler thread, or the `TelephonyManager` lookup threw.
+      for the scheduler thread, or the `TelephonyManager` lookup threw, a
+      Java exception escaped the bridge or it answered an unknown code.
     * The host stub's `nif_not_loaded` (an `ErlangError`) → fail: the
       native library was not linked into this build.
     * Anything else → fail, naming what came back.
