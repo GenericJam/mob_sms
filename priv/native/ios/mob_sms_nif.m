@@ -172,9 +172,26 @@ static ERL_NIF_TERM nif_sms_compose(ErlNifEnv *env, int argc,
   return enif_make_atom(env, "ok");
 }
 
+// sms_available() :: true | false — synchronous, read-only (MOB-418).
+// [MFMessageComposeViewController canSendText] is the same check
+// nif_sms_compose makes before presenting: false on the Simulator and on a
+// device without SMS/iMessage, so compose would deliver :not_available.
+// It is a class-method capability query (no view controller is created, no
+// UI), so it is called on the NIF's scheduler thread rather than hopping to
+// the main queue: a dispatch_sync there could deadlock against a main thread
+// that is waiting on the BEAM. MobSms.SelfTest uses the answer as proof the
+// ObjC NIF is linked and initialised.
+static ERL_NIF_TERM nif_sms_available(ErlNifEnv *env, int argc,
+                                      const ERL_NIF_TERM argv[]) {
+  (void)argc;
+  (void)argv;
+  return enif_make_atom(env, [MFMessageComposeViewController canSendText] ? "true" : "false");
+}
+
 // ── Registration ──────────────────────────────────────────────────────────
 static ErlNifFunc nif_funcs[] = {
     {"sms_compose", 2, nif_sms_compose, 0},
+    {"sms_available", 0, nif_sms_available, 0},
 };
 
 ERL_NIF_INIT(mob_sms_nif, nif_funcs, NULL, NULL, NULL, NULL)

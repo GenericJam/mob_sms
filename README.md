@@ -4,13 +4,14 @@ SMS composer for [Mob](https://github.com/GenericJam/mob) apps. Opens the user's
 
 ## Install
 
-Requires mob 0.9.1 or newer (the OTP flow's iOS half needs the
-`text_content_type` prop on `<TextField>`, added in that release).
+Requires mob 0.9.15 or newer (`Mob.Plugin.SelfTest`, which the plugin's
+on-device self-test implements; the OTP flow's iOS half needs the
+`text_content_type` prop on `<TextField>`, added in 0.9.1).
 
 ```elixir
 def deps do
   [
-    {:mob,     "~> 0.9.1"},
+    {:mob,     "~> 0.9 and >= 0.9.15"},
     {:mob_sms, "~> 0.2"}
   ]
 end
@@ -21,6 +22,8 @@ In `mob.exs`, activate the plugin:
 ```elixir
 config :mob, :plugins, [:mob_sms]
 ```
+
+`mix mob.selftest` (mob_dev 0.7.17+) runs `MobSms.SelfTest` on a connected device: a read-only `sms_available/0` NIF call (no composer, nothing sent) that proves the native side is linked and, on Android, that the Kotlin bridge registered.
 
 ## Usage
 

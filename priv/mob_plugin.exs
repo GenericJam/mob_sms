@@ -1,7 +1,11 @@
 %{
   name: :mob_sms,
-  mob_version: "~> 0.9.1",
+  mob_version: "~> 0.9",
   plugin_spec_version: 1,
+  # On-device proof for `mix mob.selftest` / mob_ci: the read-only
+  # sms_available/0 NIF (canSendText on iOS, TelephonyManager.isSmsCapable
+  # through the Kotlin bridge on Android). See Mob.Plugin.SelfTest.
+  selftest: MobSms.SelfTest,
   # Package description lives in mix.exs (that's what Hex publishes and what
   # `mix hex.info mob_sms` shows). The plugin manifest schema does not accept
   # a top-level :description key today — cf. mob_dev's Manifest.@known_keys.

@@ -27,17 +27,29 @@ extern var g_jvm: ?*jni.JavaVM;
 const SmsMethods = struct {
     compose: jni.JMethodID = null,
     arm_one_time_code: jni.JMethodID = null,
+    available: jni.JMethodID = null,
 };
 
 var g_sms: SmsMethods = .{};
 var g_sms_cls: jni.JClass = null;
 
+// GetStaticMethodID leaves a NoSuchMethodError pending when the bridge lacks
+// the method. Clear it so the remaining lookups, and register()'s return into
+// Kotlin, don't run with an exception pending; the null id then makes the
+// NIFs report the bridge as not registered.
+fn staticMethod(jenv: *jni.JNIEnv, cls: jni.JClass, name: [*:0]const u8, sig: [*:0]const u8) jni.JMethodID {
+    const mid = jni.getStaticMethodID(jenv, cls, name, sig);
+    if (mid == null) jni.exceptionClear(jenv);
+    return mid;
+}
+
 // ── nativeRegister thunk — cache the bridge jclass + method ids ───────────
 export fn Java_io_mob_sms_MobSmsBridge_nativeRegister(jenv: *jni.JNIEnv, cls: jni.JClass) callconv(.c) void {
     g_sms_cls = jni.newGlobalRef(jenv, cls);
     if (g_sms_cls == null) return;
-    g_sms.compose = jni.getStaticMethodID(jenv, cls, "sms_compose", "(JLjava/lang/String;Ljava/lang/String;)V");
-    g_sms.arm_one_time_code = jni.getStaticMethodID(jenv, cls, "arm_one_time_code", "(J)V");
+    g_sms.compose = staticMethod(jenv, cls, "sms_compose", "(JLjava/lang/String;Ljava/lang/String;)V");
+    g_sms.arm_one_time_code = staticMethod(jenv, cls, "arm_one_time_code", "(J)V");
+    g_sms.available = staticMethod(jenv, cls, "sms_available", "()I");
 }
 
 // ── Thread-attach + pid round-trip helpers (mirror mob-core / biometric) ──
@@ -234,6 +246,45 @@ fn nif_sms_arm_one_time_code(
     return callBridgeArmOtp(env, pid);
 }
 
+fn errorTuple(env: ?*erts.ErlNifEnv, comptime reason: [:0]const u8) erts.ERL_NIF_TERM {
+    return erts.makeTuple(env, .{ erts.atom(env, "error"), erts.atom(env, reason) });
+}
+
+// sms_available() :: true | false | {:error, reason} — synchronous, read-only
+// (MOB-418). Calls MobSmsBridge.sms_available(), which answers an Int code
+// (see the Kotlin side). The error tuples are what MobSms.SelfTest fails on:
+//   bridge_not_registered  nativeRegister never ran (the plugin bootstrap did
+//                          not call MobSmsBridge.register()) or the lookup failed
+//   no_jni_env             no JNIEnv for this scheduler thread
+//   no_activity            the bootstrap never called setActivity
+//   query_failed           the TelephonyManager lookup threw, a Java exception
+//                          escaped the bridge, or an unknown code came back
+fn nif_sms_available(
+    env: ?*erts.ErlNifEnv,
+    argc: c_int,
+    argv: [*]const erts.ERL_NIF_TERM,
+) callconv(.c) erts.ERL_NIF_TERM {
+    _ = argc;
+    _ = argv;
+    if (g_sms_cls == null or g_sms.available == null) return errorTuple(env, "bridge_not_registered");
+    var attached: c_int = 0;
+    const jenv = get_jenv(&attached) orelse return errorTuple(env, "no_jni_env");
+    defer detachIfAttached(attached);
+    const code = jenv.*.CallStaticIntMethod.?(jenv, g_sms_cls, g_sms.available);
+    // Kotlin catches Throwable around everything that can throw, so nothing
+    // should be pending. Clear anyway (a no-op otherwise): a scheduler thread
+    // get_jenv attached for good must not carry an exception into its next
+    // JNI call. mob's JNIEnv table doesn't type ExceptionCheck, but an escaped
+    // exception makes the call yield 0, which no answer uses: query_failed.
+    jni.exceptionClear(jenv);
+    return switch (code) {
+        1 => erts.atom(env, "true"),
+        2 => erts.atom(env, "false"),
+        -1 => errorTuple(env, "no_activity"),
+        else => errorTuple(env, "query_failed"),
+    };
+}
+
 // ── NIF table + init entry point ─────────────────────────────────────────
 fn nifLoad(env: ?*erts.ErlNifEnv, priv: *?*anyopaque, info: erts.ERL_NIF_TERM) callconv(.c) c_int {
     _ = env;
@@ -245,6 +296,7 @@ fn nifLoad(env: ?*erts.ErlNifEnv, priv: *?*anyopaque, info: erts.ERL_NIF_TERM) c
 const nif_funcs = [_]erts.ErlNifFunc{
     .{ .name = "sms_compose", .arity = 2, .fptr = nif_sms_compose, .flags = 0 },
     .{ .name = "sms_arm_one_time_code", .arity = 0, .fptr = nif_sms_arm_one_time_code, .flags = 0 },
+    .{ .name = "sms_available", .arity = 0, .fptr = nif_sms_available, .flags = 0 },
 };
 
 var nif_entry: erts.ErlNifEntry = .{

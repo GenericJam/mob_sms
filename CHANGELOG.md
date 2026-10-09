@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ---
 
+## [Unreleased]
+
+### Added
+- **On-device self-test** (MOB-418). `MobSms.SelfTest` implements `Mob.Plugin.SelfTest` and is declared in the manifest as `selftest:`. It calls a new read-only NIF, `:mob_sms_nif.sms_available/0`: `true` or `false` pass (the native side answered; `false` is a device without SMS service, such as the Simulator or an emulator without telephony), while `{:error, :bridge_not_registered}`, `{:error, :no_activity}`, any other answer and the host stub's `nif_not_loaded` fail. Run it with `mix mob.selftest` from a host app (mob_dev 0.7.17).
+- **`sms_available/0` NIF** on both platforms. iOS answers `[MFMessageComposeViewController canSendText]`; Android calls `MobSmsBridge.sms_available()`, which answers `TelephonyManager.isSmsCapable` and reports an unregistered bridge, a missing Activity, a missing JNIEnv or a failed lookup as `{:error, reason}` instead of a boolean. No permission, no UI.
+
+### Changed
+- Requires mob 0.9.15 (`{:mob, "~> 0.9 and >= 0.9.15"}`); the manifest's `mob_version` is now `~> 0.9`. mob_dev (dev/test only) is `~> 0.7.17`.
+- Android: `nativeRegister` clears the pending `NoSuchMethodError` when a bridge method-ID lookup fails, so the remaining lookups still run and the NIFs report the bridge as not registered instead of `register()` throwing.
+- Android: `MobSmsBridge.activityRef` is `@Volatile` (written on the UI thread, read from BEAM scheduler threads).
+
 ## [0.2.3] - 2026-10-01
 
 ### Fixed
