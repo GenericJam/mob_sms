@@ -257,7 +257,8 @@ fn errorTuple(env: ?*erts.ErlNifEnv, comptime reason: [:0]const u8) erts.ERL_NIF
 //                          not call MobSmsBridge.register()) or the lookup failed
 //   no_jni_env             no JNIEnv for this scheduler thread
 //   no_activity            the bootstrap never called setActivity
-//   query_failed           the TelephonyManager lookup threw
+//   query_failed           the TelephonyManager lookup threw, a Java exception
+//                          escaped the bridge, or an unknown code came back
 fn nif_sms_available(
     env: ?*erts.ErlNifEnv,
     argc: c_int,
@@ -273,11 +274,12 @@ fn nif_sms_available(
     // Kotlin catches Throwable around everything that can throw, so nothing
     // should be pending. Clear anyway (a no-op otherwise): a scheduler thread
     // get_jenv attached for good must not carry an exception into its next
-    // JNI call. mob's JNIEnv table doesn't type ExceptionCheck.
+    // JNI call. mob's JNIEnv table doesn't type ExceptionCheck, but an escaped
+    // exception makes the call yield 0, which no answer uses: query_failed.
     jni.exceptionClear(jenv);
     return switch (code) {
         1 => erts.atom(env, "true"),
-        0 => erts.atom(env, "false"),
+        2 => erts.atom(env, "false"),
         -1 => errorTuple(env, "no_activity"),
         else => errorTuple(env, "query_failed"),
     };

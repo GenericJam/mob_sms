@@ -85,10 +85,12 @@ object MobSmsBridge : io.mob.plugin.MobActivityAware {
     // MobSms.SelfTest (MOB-418). Return codes, mapped to Elixir terms by the
     // zig NIF:
     //    1 -> true   the device is SMS-capable (TelephonyManager.isSmsCapable)
-    //    0 -> false  no SMS service (a tablet without a radio, some emulators)
+    //    2 -> false  no SMS service (a tablet without a radio, some emulators)
     //   -1 -> {:error, :no_activity}   setActivity never ran: a host
     //         integration bug, sms_compose would deliver :not_available
     //   -2 -> {:error, :query_failed}  the TelephonyManager lookup threw
+    // No answer is 0 on purpose: CallStaticIntMethod yields 0 when a Java
+    // exception escapes, and the NIF must not read that as `false` (a pass).
     // The catch keeps a Java exception from returning pending into the NIF.
     // No permission, nothing shown, nothing registered.
     @JvmStatic
@@ -101,7 +103,7 @@ object MobSmsBridge : io.mob.plugin.MobActivityAware {
             // isDeviceSmsCapable, which hosts compiling against API 34 lack.
             @Suppress("DEPRECATION")
             val capable = tm?.isSmsCapable == true
-            if (capable) 1 else 0
+            if (capable) 1 else 2
         } catch (t: Throwable) {
             -2
         }
