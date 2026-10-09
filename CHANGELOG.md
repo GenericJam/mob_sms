@@ -14,7 +14,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 - Requires mob 0.9.15 (`{:mob, "~> 0.9 and >= 0.9.15"}`); the manifest's `mob_version` is now `~> 0.9`. mob_dev (dev/test only) is `~> 0.7.17`.
-- Android: `nativeRegister` clears the pending `NoSuchMethodError` when a bridge method-ID lookup fails, so the remaining lookups still run and the NIFs report the bridge as not registered instead of `register()` throwing.
+- Android: `nativeRegister` clears the pending `NoSuchMethodError` when a bridge method-ID lookup fails, so the remaining lookups still run and the NIFs report the bridge as not registered instead of `register()` throwing. `MobSmsBridge.activityRef` is `@Volatile` (written on the UI thread, read from BEAM scheduler threads).
 
 ## [0.2.3] - 2026-10-01
 

@@ -42,9 +42,17 @@ defmodule MobSms.SelfTest do
   def run(_ctx) do
     classify(:mob_sms_nif.sms_available())
   rescue
+    # Only the host stub's nif_not_loaded means "not linked"; any other raise
+    # propagates and the runner counts it as a failure with its real message.
     e in ErlangError ->
-      {:fail,
-       "mob_sms_nif is not linked into this build: sms_available/0 raised #{Exception.message(e)}"}
+      case e do
+        %ErlangError{original: :nif_not_loaded} ->
+          {:fail,
+           "mob_sms_nif is not linked into this build: sms_available/0 raised #{Exception.message(e)}"}
+
+        _ ->
+          reraise e, __STACKTRACE__
+      end
   end
 
   @doc false

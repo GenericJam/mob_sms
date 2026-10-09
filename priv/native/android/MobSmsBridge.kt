@@ -46,7 +46,9 @@ import com.google.android.gms.common.api.Status
 import java.lang.ref.WeakReference
 
 object MobSmsBridge : io.mob.plugin.MobActivityAware {
-    private var activityRef: WeakReference<Activity>? = null
+    // @Volatile: written on the UI thread (setActivity), read on BEAM
+    // scheduler threads (sms_available, sms_compose, arm_one_time_code).
+    @Volatile private var activityRef: WeakReference<Activity>? = null
 
     // Track the live retriever alongside its caller pid. A second
     // arm_one_time_code call replaces the first (SmsRetriever is a per-app

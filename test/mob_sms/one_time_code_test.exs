@@ -34,7 +34,7 @@ defmodule MobSms.OneTimeCodeTest do
       # QuickType autofill never fires). mob 0.9.15 shipped Mob.Plugin.SelfTest.
       # The manifest's mob_version is the family-wide "~> 0.9"; the floor is
       # enforced by the Hex dependency every host resolves.
-      {:mob, req} = List.keyfind(Mix.Project.config()[:deps], :mob, 0)
+      req = Mix.Project.config()[:deps] |> List.keyfind(:mob, 0) |> elem(1)
 
       for too_old <- ["0.9.0", "0.9.1", "0.9.14"], do: refute(Version.match?(too_old, req))
       assert Version.match?("0.9.15", req)

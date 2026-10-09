@@ -270,6 +270,11 @@ fn nif_sms_available(
     const jenv = get_jenv(&attached) orelse return errorTuple(env, "no_jni_env");
     defer detachIfAttached(attached);
     const code = jenv.*.CallStaticIntMethod.?(jenv, g_sms_cls, g_sms.available);
+    // Kotlin catches Throwable around everything that can throw, so nothing
+    // should be pending. Clear anyway (a no-op otherwise): a scheduler thread
+    // get_jenv attached for good must not carry an exception into its next
+    // JNI call. mob's JNIEnv table doesn't type ExceptionCheck.
+    jni.exceptionClear(jenv);
     return switch (code) {
         1 => erts.atom(env, "true"),
         0 => erts.atom(env, "false"),
